@@ -22,7 +22,6 @@ class R2D2(L2) :
         return descriptor, reliability, repeatability
 
     def forward(self, images) :
-        num_batches = len(images)
         descriptors = []
         reliabilities = []
         repeatabilities = []

@@ -4,6 +4,7 @@ class L2(nn.Module) :
     def __init__(self) :
         super().__init__()
         self.L2_layers = nn.ModuleList([])
+        self.out_dim = 128
         self.add_conv(3, 32, 3, 1)
         self.add_conv(32, 32, 3, 1)
         self.add_conv(32, 64, 3, 2)
