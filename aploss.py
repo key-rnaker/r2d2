@@ -26,7 +26,7 @@ class QAPLoss(nn.Module) :
         # 0 <= m < nBin
         """
             - m : m-th bin
-            - sim_q : Cosine Similarity between Descriptors tensor of shape (db_size)
+            - sim_q : Cosine Similarity between Descriptors tensor of shape (1, db_size, M)
             - labels : ground truth relavant between db and query tensor of shape (db_size)
         """
         db_size = sim_q.shape
