@@ -6,7 +6,6 @@ from L2 import L2
 class R2D2(L2) :
     def __init__(self) :
         super().__init__()
-        self.descript_layer = F.normalize(self.out_dim)
         self.reliability_layer = nn.Conv2d(self.out_dim, 2, 1)
         self.repeatability_layer = nn.Conv2d(self.out_dim, 2, 1)
 
@@ -20,13 +19,13 @@ class R2D2(L2) :
             - reliability : reliability heatmap torch tensor shape (1, H, W)
             - repeatability : repeatability heatmap torch tensor shape (1, H, W)
         """
-        x = image
+        x = image.unsqueeze(0)
         for layer in self.L2_layers :
             # x shape (128, H, W)
             x = layer(x)
 
         # descriptor shape (128, H, W)
-        descriptor = self.descript_layer(x)
+        descriptor = F.normalize(x, p=2, dim=1)
         # reliability shape (1, H, W)
         reliability = F.softmax(self.reliability_layer(x**2))[:,1]
         # repeatability shape (1, H, W)

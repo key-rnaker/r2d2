@@ -9,7 +9,8 @@ import numpy as np
 from datetime import datetime
 from tensorboardX import SummaryWriter
 
-from dataloader import R2D2Dataset
+from dataloader import R2D2Dataset, collate_fn
+from loss import CosimLoss, PeakyLoss, APLoss
 from R2D2 import R2D2
 
 parser = argparse.ArgumentParser(description='R2D2')
@@ -29,8 +30,43 @@ nEpochs = 25
 
 def train(epoch) :
 
+    epoch_loss = 0
+    
+    dataloader = DataLoader(dataset, num_workers=8, batch_size=batch_size, shuffle=True, pin_memory=True, collate_fn=collate_fn)
+    nBatches = (len(dataset) + batch_size - 1) // batch_size
+    r2d2.train()
+    for iteration, (source_images, transform_images, metas) in enumerate(dataloader, 1) :
+        B, C, H, W = source_images.shape
+        input = torch.cat([source_images, transform_images])
+        input = input.to(device)
+        descriptors, reliabilities, repeatabilities = r2d2(input)
 
-    return None
+        descriptor1, descriptor2 = torch.split(descriptors, [B, B])
+        reliability1, reliability2 = torch.split(reliabilities, [B, B])
+        repeatability1, repeatability2 = torch.split(repeatabilities, [B, B])
+
+        optimizer.zero_grad()
+
+        Rep_loss = cosimloss([repeatability1, repeatability2], metas) + peakyloss([repeatability1, repeatability2])
+        AP_loss = aploss([descriptor1, descriptor2], reliability1, metas)
+
+        loss = Rep_loss + AP_loss
+        loss.to(device)
+        loss.backward()
+        optimizer.step()
+        del input, descriptors, reliabilities, repeatabilities
+        del descriptor1, descriptor2, reliability1, reliability2, repeatability1, repeatability2
+
+        batch_loss = loss.item()
+        epoch_loss += batch_loss
+
+    del dataloader, loss
+    optimizer.zero_grad()
+    torch.cuda.empty_cache()
+    epoch_loss /= nBatches
+
+    print("===> Epoch {} Complete : Avg. Loss: {:.4f}".format(epoch, epoch_loss), flush=True)
+    writer.add_scalar('Train/AvgLoss', epoch_loss, epoch)
 
 def save_checkpoint(savePath, state, filename='checkpoint.pth.tar') :
     model_out_path = os.path.join(savePath, filename)
@@ -48,7 +84,6 @@ if __name__ == "__main__":
 
     print("===> Loading Dataset")
     dataset = R2D2Dataset(args.dataPath)
-    dataloader = DataLoader(dataset, num_workers=8, batch_size=batch_size, shuffle=True, pin_memory=True)
     print("Done Load")
 
     print("===> Building model")
@@ -73,6 +108,9 @@ if __name__ == "__main__":
         r2d2.to(device)
 
     #criterion here
+    cosimloss = CosimLoss().to(device)
+    peakyloss = PeakyLoss().to(device)
+    aploss = APLoss().to(device)
 
     print("Done Build")
 

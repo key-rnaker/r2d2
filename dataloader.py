@@ -7,7 +7,6 @@ import numpy as np
 from PIL import Image
 
 def input_transform():
-    # pre trained VGG16 model expects input images normalized
     # mean and std of ImageNet
     return transforms.Compose([
         transforms.ToTensor(),
@@ -41,7 +40,8 @@ class R2D2Dataset(data.Dataset) :
         self.root_dir = root_dir
         self.style_images = os.listdir(os.path.join(self.root_dir, "style_transfer"))
         self.optical_images = os.listdir(os.path.join(self.root_dir, "optical_flow", "flow"))
-        self.total_images = self.style_images + self.optical_images
+        self.total_images = np.asarray(self.style_images + self.optical_images)
+        self.total_images.sort()
         self.input_transform = input_transform()
 
     def flowimage_to_aflow(self, flow_image) :
@@ -52,24 +52,14 @@ class R2D2Dataset(data.Dataset) :
         aflow = flow + mgrid
         return aflow
 
-    def aflow_to_grid(self, aflow) :
-        H, W = aflow.shape[:2]
+    def aflow_to_grid(self, aflow, image2_size) :
+        W,H = image2_size
         grid = torch.from_numpy(aflow).unsqueeze(0)
         grid[:,:,:,0] *= 2/(W-1)
         grid[:,:,:,1] *= 2/(H-1)
         grid -= 1
         grid[torch.isnan(grid)] = 9e9
         return grid
-
-    def get_label(self, image1_size) :
-        W, H = image1_size
-        label = torch.zeros([H,W,H,W])
-        for i in range(H) :
-            for j in range(W) :
-                label = torch.zeros([H, W])
-                label[i,j][max(0, i-4) : min(H1, i+5), max(0, j-4) : min(W1, j+5)] = 1
-
-        return label
 
     def get_optical_image_pair(self, image_name) :
 
@@ -87,35 +77,32 @@ class R2D2Dataset(data.Dataset) :
         W, H = source_image.size
 
         aflow = self.flowimage_to_aflow(flow_image)
-        grid = self.aflow_to_grid(aflow)
+        grid = self.aflow_to_grid(aflow, transform_image.size)
 
         meta = {}
-        meta['grid'] = grid
+        meta['grid'] = grid.float()
         meta['mask'] = mask_array
-        meta['label'] = self.get_label(source_image.size)
 
         return source_image, transform_image, meta
 
     def get_style_image_pair(self, image_name) :
 
         source_image_name = image_name.split('.')[0] + '.' + image_name.split('.')[1]
-        source_image = Image.open(os.path.join(root_dir, 'aachen', 'images_upright', 'db', source_image_name))
-        source_image = self.input_transform(source_image)
+        source_image = Image.open(os.path.join(self.root_dir, 'aachen', 'images_upright', 'db', source_image_name))
+        #print(source_image.shape)
 
-        transform_image = Image.open(os.path.join(root_dir, 'style_transfer', image_name))
-        transform_image = self.input_transform(transform_image)
+        transform_image = Image.open(os.path.join(self.root_dir, 'style_transfer', image_name))
 
-        W, H = source_image.size
+        W,H = source_image.size
         sx = transform_image.size[0] / float(W)
         sy = transform_image.size[1] / float(H)
 
         mgrid = np.mgrid[0:H, 0:W][::-1].transpose(1,2,0).astype(np.float32)
         aflow = mgrid * (sx, sy)
-        grid = self.aflow_to_grid(aflow)
+        grid = self.aflow_to_grid(aflow, transform_image.size)
 
         meta = {}
-        meta['grid'] = grid
-        meta['label'] = self.get_label(source_image.size)
+        meta['grid'] = grid.float()
 
         return source_image, transform_image, meta
 
@@ -131,8 +118,23 @@ class R2D2Dataset(data.Dataset) :
         
         source_image, transform_image, meta = self.get_image_pair(self.total_images[index])
 
-        source_image = self.input_transform(source_image)
-        transform_image = self.input_transform(transform_image)
+        
+        resize1 = transforms.Resize((source_image.size[1]//2, source_image.size[0]//2))
+        resize2 = transforms.Resize((transform_image.size[1]//2, transform_image.size[0]//2))
+
+        source_image = self.input_transform(resize1(source_image))
+        transform_image = self.input_transform(resize2(transform_image))
+        
+        meta['grid'] = torch.nn.MaxPool2d(2)(meta['grid'].permute(0,3,1,2)).permute(0,2,3,1)
+        
+        if 'mask' in meta :
+            mask = torch.from_numpy(meta['mask'].astype(np.float))
+            mask = mask.unsqueeze(0).unsqueeze(0)
+            pool_mask = torch.nn.MaxPool2d(2)(mask)
+            meta['mask'] = pool_mask.squeeze(0).squeeze(0)
+            mymask = meta['mask'].numpy().astype(np.float)
+            meta['grid'][0,:,:,0] += mymask
+            meta['grid'][0,:,:,1] += mymask
 
         return source_image, transform_image, meta
 

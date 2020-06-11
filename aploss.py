@@ -11,13 +11,13 @@ class QAPLoss(nn.Module) :
     def cosdis(self, vi, vj) :
         """ 
         Args :
-            - vi : Descriptors torch tensor of shape (batch_size, N, M)
-            - vj : Descriptors torch tensor of shape (batch_size, N, M)
+            - vi : Descriptors torch tensor of shape (batch_size, db_size, M)
+            - vj : Descriptors torch tensor of shape (batch_size, db_size, M)
             N is number of Descriptor
             M is Descriptor dimension
 
         Return :
-            - return : Cosine Similarity tensor of shape (batch_size, N)
+            - return : Cosine Similarity tensor of shape (batch_size, db_size)
         """
         cos = nn.CosineSimilarity(dim=2)
         return cos(vi, vj)
@@ -26,7 +26,7 @@ class QAPLoss(nn.Module) :
         # 0 <= m < nBin
         """
             - m : m-th bin
-            - sim_q : Cosine Similarity between Descriptors tensor of shape (1, db_size, M)
+            - sim_q : Cosine Similarity between Descriptors tensor of shape (1, db_size)
             - labels : ground truth relavant between db and query tensor of shape (db_size)
         """
         db_size = sim_q.shape
@@ -34,7 +34,7 @@ class QAPLoss(nn.Module) :
         pNumerator = 1e-16
 
         # sim_q = [db_size, nBin]
-        sim_q = sim_q.unsqueeze(-1).expand( -1, self.centerBin.shape[0])
+        sim_q = sim_q.squeeze(0).unsqueeze(-1).expand( -1, self.centerBin.shape[0])
         # centerBin = [db_size, nBin]
         centerBin = self.centerBin.unsqueeze(0).expand(sim_q.shape[0], -1)
 
@@ -61,7 +61,10 @@ class QAPLoss(nn.Module) :
             - label : ground truth relavant between db Descriptor and query Descriptor (db_size)
         """
 
+        # arg1 = [1, db_size, M]
+        # arg2 = [1, db_size, M]
         sim_q = self.cosdis(X.unsqueeze(0).unsqueeze(0).expand(-1,Xs.shape[0],-1), Xs.unsqueeze(0))
+        # sim_q = [1, db_size]
 
         APQ = []
         for m in range(self.nBin) :
