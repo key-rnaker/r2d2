@@ -32,30 +32,31 @@ def train(epoch) :
 
     epoch_loss = 0
     
-    dataloader = DataLoader(dataset, num_workers=8, batch_size=batch_size, shuffle=True, pin_memory=True, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, num_workers=threads, batch_size=batch_size, shuffle=True, pin_memory=True, collate_fn=collate_fn)
     nBatches = (len(dataset) + batch_size - 1) // batch_size
     r2d2.train()
     for iteration, (source_images, transform_images, metas) in enumerate(dataloader, 1) :
-        B, C, H, W = source_images.shape
-        input = torch.cat([source_images, transform_images])
-        input = input.to(device)
-        descriptors, reliabilities, repeatabilities = r2d2(input)
 
-        descriptor1, descriptor2 = torch.split(descriptors, [B, B])
-        reliability1, reliability2 = torch.split(reliabilities, [B, B])
-        repeatability1, repeatability2 = torch.split(repeatabilities, [B, B])
+        loss = 0
+        for b in range(len(source_images)) :
+            image1 = source_images[b].to(device)
+            image2 = transform_images[b].to(device)
+            meta = metas[b]
+            meta['grid'] = meta['grid'].to(device)
+            if 'mask' in meta :
+                meta['mask'] = meta['mask'].to(device)
 
-        optimizer.zero_grad()
+            descriptors, reliabilities, repeatabilities = r2d2([image1, image2])
+            loss1 = cosimloss.forward_one(repeatabilities[0][0], repeatabilities[1][0], meta)
+            loss2 = (peakyloss.forward_one(repeatabilities[0][0]) + peakyloss.forward_one(repeatabilities[1][0]) )/2
+            loss3 = aploss.forward_one(descriptors[0][0], descriptors[1][0], reliabilities[0][0], meta)
+            loss += loss1 + loss2 + loss3
 
-        Rep_loss = cosimloss([repeatability1, repeatability2], metas) + peakyloss([repeatability1, repeatability2])
-        AP_loss = aploss([descriptor1, descriptor2], reliability1, metas)
-
-        loss = Rep_loss + AP_loss
+        loss = loss/batch_size
         loss.to(device)
         loss.backward()
         optimizer.step()
         del input, descriptors, reliabilities, repeatabilities
-        del descriptor1, descriptor2, reliability1, reliability2, repeatability1, repeatability2
 
         batch_loss = loss.item()
         epoch_loss += batch_loss

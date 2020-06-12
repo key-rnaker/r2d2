@@ -26,17 +26,19 @@ def collate_fn(batch) :
     meta : tuple (batch_size, dict['aflow', 'mask'])
     """
 
+    """
     source_images = data.dataloader.default_collate(source_image)
     transform_images = data.dataloader.default_collate(transform_image)
     metas = data.dataloader.default_collate(meta)
+    """
 
-    return source_images, transform_images, metas
+    return source_image, transform_image, meta
 
 
 class R2D2Dataset(data.Dataset) :
-    def __init__(self, root_dir) :
+    def __init__(self, root_dir, image_resize_ratio=4) :
         super().__init__()
-
+        self.image_ratio = image_resize_ratio
         self.root_dir = root_dir
         self.style_images = os.listdir(os.path.join(self.root_dir, "style_transfer"))
         self.optical_images = os.listdir(os.path.join(self.root_dir, "optical_flow", "flow"))
@@ -119,20 +121,20 @@ class R2D2Dataset(data.Dataset) :
         source_image, transform_image, meta = self.get_image_pair(self.total_images[index])
 
         
-        resize1 = transforms.Resize((source_image.size[1]//2, source_image.size[0]//2))
-        resize2 = transforms.Resize((transform_image.size[1]//2, transform_image.size[0]//2))
+        resize1 = transforms.Resize((source_image.size[1]//self.image_ratio, source_image.size[0]//self.image_ratio))
+        resize2 = transforms.Resize((transform_image.size[1]//self.image_ratio, transform_image.size[0]//self.image_ratio))
 
         source_image = self.input_transform(resize1(source_image))
         transform_image = self.input_transform(resize2(transform_image))
         
-        meta['grid'] = torch.nn.MaxPool2d(2)(meta['grid'].permute(0,3,1,2)).permute(0,2,3,1)
+        meta['grid'] = torch.nn.MaxPool2d(self.image_ratio)(meta['grid'].permute(0,3,1,2)).permute(0,2,3,1)
         
         if 'mask' in meta :
             mask = torch.from_numpy(meta['mask'].astype(np.float))
             mask = mask.unsqueeze(0).unsqueeze(0)
-            pool_mask = torch.nn.MaxPool2d(2)(mask)
-            meta['mask'] = pool_mask.squeeze(0).squeeze(0)
-            mymask = meta['mask'].numpy().astype(np.float)
+            pool_mask = torch.nn.MaxPool2d(self.image_ratio)(mask)
+            meta['mask'] = pool_mask.squeeze(0)
+            mymask = meta['mask'].numpy().astype(np.float) - 1
             meta['grid'][0,:,:,0] += mymask
             meta['grid'][0,:,:,1] += mymask
 

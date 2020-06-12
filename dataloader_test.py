@@ -8,11 +8,12 @@ dataset = R2D2Dataset(root_dir='/media/jhyeup/5666b044-8f1b-47ad-83f3-d0acf3c6ec
 source_image, transform_image, meta = dataset.__getitem__(2)
 
 def tran(image1, image2, meta) :
-    image1 = transforms.Resize((image1.size[1]//2, image1.size[0]//2))(image1)
-    image2 = transforms.Resize((image2.size[1]//2, image2.size[0]//2))(image2)
+    #image1 = transforms.Resize((image1.size[1]//2, image1.size[0]//2))(image1)
+    #image2 = transforms.Resize((image2.size[1]//2, image2.size[0]//2))(image2)
     tensor1 = transforms.ToTensor()(image1)
     tensor2 = transforms.ToTensor()(image2)
 
+    """
     grid = meta['grid']
     grid = grid.permute(0,3,1,2)
     pool_grid = torch.nn.MaxPool2d(2)(grid)
@@ -27,7 +28,7 @@ def tran(image1, image2, meta) :
         mymask = meta['mask'].numpy().astype(np.float) - 1
         meta['grid'][0,:,:,0] += mymask
         meta['grid'][0,:,:,1] += mymask
-
+    """
     tensor1f2 = torch.nn.functional.grid_sample(tensor2.unsqueeze(0), meta['grid']).squeeze(0)
 
     """

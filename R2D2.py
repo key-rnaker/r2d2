@@ -52,4 +52,4 @@ class R2D2(L2) :
             reliabilities.append(reliability)
             repeatabilities.append(repeatability)
 
-        return torch.stack(descriptors), torch.stack(reliabilities), torch.stack(repeatabilities)
+        return descriptors, reliabilities, repeatabilities

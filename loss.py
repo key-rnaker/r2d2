@@ -27,15 +27,18 @@ class CosimLoss(nn.Module) :
         Args :
             - rep_map1 : repeatability heatmap tensor shape of (1, H, W)
             - rep_map2 : repeatability heatmap tensor shape of (1, H2, W2)
-            - meata['grid'] = grid rep_map2 --> rep_map1
+            - meata['grid'] = grid rep_map2 --> rep_map1 tensor shape of (1, H, W, 2)
         """
 
-        transform_rep_map = F.grid_sample(rep_map2.unsqueeze(0), meta['grid'], mode='bilinear', padding_mode='border')
+        #transform_rep_map = F.grid_sample(rep_map2.unsqueeze(0), meta['grid'], mode='bilinear', padding_mode='border')
+        transform_rep_map = F.grid_sample(rep_map2.unsqueeze(0), meta['grid'])
+        if 'mask' in meta :
+            rep_map1 = rep_map1 * meta['mask']
         image1_patches = self.extract_pacthes(rep_map1.unsqueeze(0))
         image2_patches = self.extract_pacthes(transform_rep_map)
         cosim = (image1_patches * image2_patches).sum(dim=2)
 
-        return 1 - cosim.mean()
+        return 1 *( cosim[cosim!=0].shape[0] / cosim.shape[1]) - cosim.mean()
 
 
     def forward(self, repeatability_map, metas) :
@@ -61,11 +64,11 @@ class PeakyLoss(nn.Module) :
     def __init__(self, patch_size=16):
         super().__init__()
         self.N = patch_size
-        self.maxpool = nn.MaxPool2d(N+1, stride=1, padding=N//2)
-        self.avgpool = nn.AvgPool2d(N+1, stride=1, padding=N//2)
+        self.maxpool = nn.MaxPool2d(self.N+1, stride=1, padding=self.N//2)
+        self.avgpool = nn.AvgPool2d(self.N+1, stride=1, padding=self.N//2)
 
     def forward_one(self, repeatability) :
-        return 1 - (self.maxpool(repeatability) - self.avgpool(repeatability)).mean()
+        return 1 - (self.maxpool(repeatability.unsqueeze(0)) - self.avgpool(repeatability.unsqueeze(0))).mean()
 
     def forward(self, repeatability_map) :
         """
@@ -94,6 +97,42 @@ class APLoss(nn.Module) :
         self.k = k
         self.qaploss = QAPLoss()
 
+    def forward_one(self, descriptor1, descriptor2, reliability, meta) :
+        """
+        Args :
+            - descriptor1 : descriptor of image1 torch tensor shape of (128, H, W)
+            - descriptor2 : descriptor of image2 torch tensor shape of (128, H2, W2)
+            - reliability : reliability heatmap of image1 torch tensor shape of (1, H, W)
+        """
+
+        H, W = descriptor1.shape[1:]
+        query = descriptor1.view(-1, H*W).transpose(1,0)
+        # query shape (128, H, W) -> (H*W, 128)
+
+        db = F.grid_sample(descriptor2.unsqueeze(0), meta['grid']).squeeze(0)
+        db = db.view(-1, H*W).transpose(1,0)
+        # db shape (H*W, 128)
+
+        reliability = reliability.view(-1)
+        # reliability shape (H*W)
+
+        flatten_mask = (meta['mask'][0] == 1).view(-1)
+        # flatten_mask shape (H*W)
+
+        APQ = []
+        for i in range(H*W) :
+            y = i % W
+            x = i // W
+            descriptor_label = torch.zeros([H,W])
+            descriptor_label[max(0, x-4) : min(H, x+5), max(0, y-4) : min(W, y+5)] = 1
+            db = db[flatten_mask]
+            descriptor_label = descriptor_label.view(-1)[flatten_mask]
+            ap = self.qaploss.forward_one(query[i], db, descriptor_label)
+            APQ.append(1 - (ap * reliability[i] + self.k*(1 - reliability[i])))
+            del x, y, descriptor_label
+
+        return  torch.mean(torch.stack(APQ))
+
     def forward(self, descriptors, reliability, metas) :
         """
         Args :
@@ -108,41 +147,10 @@ class APLoss(nn.Module) :
         batch_size = image1_descriptor.shape[0]
         AP = []
 
-        for i in range(batch_size) :
-            query = image1_descriptor[i]
-            meta = metas[i]
-            reliability_map = reliability[i]
-            H = query.shape[1]
-            W = query.shape[2]
+        for b in range(batch_size) :
+            AP.append(self.forward_one(image1_descriptor[b], image2_descriptor[b], reliability[b], metas[b]))
 
-            query = query.view(-1, query.shape[1]*query.shape[2]).transpose(1,0)
-            # query shape (128, H, W) -> (H*W, 128)
-            
-            db = F.grid_sample(image2_descriptor.unsqueeze(0), meta['grid']).squeeze(0)
-            db = db.view(-1, db.shape[1]*db.shape[2]).transpose(1,0)
-            db = db.unsqueeze(0).expand(query.shape[0], -1, -1)
-            # db shape (128, H, W) -> (H*W, H*W, 128)
-
-            reliability_map = reliability_map.squeeze(0).view(-1)
-
-            #AP.append(self.qaploss.forward(query, db, descriptor_label))
-
-            APQ = []
-            for j in range(H*W) :
-                descriptor_label = torch.zeros([H,W])
-                y = j % W
-                x = j // W
-                descriptor_label[max(0, x-4) : min(H, x+5), max(0, y-4) : min(W, y+5)] = 1
-                descriptor_label = descriptor_label.view(-1)
-                ap = self.qaploss.forward_one(query[j], db[j], descriptor_label)
-                APQ.append( 1 - (ap * reliability_map[j] + self.k * (1 - reliability_map[j]) ))
-                del x, y, descriptor_label
-            
-            AP.append(torch.mean(torch.stack(APQ)))
-
-        mAP = torch.mean(torch.stack(AP))
-
-        return mAP
+        return torch.mean(torch.stack(AP))
 
 
 
