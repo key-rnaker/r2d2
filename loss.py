@@ -37,7 +37,9 @@ class CosimLoss(nn.Module) :
         image1_patches = self.extract_pacthes(rep_map1.unsqueeze(0))
         image2_patches = self.extract_pacthes(transform_rep_map)
         cosim = (image1_patches * image2_patches).sum(dim=2)
+        # cosim shape = [1, H-(N-1) * W-(N-1)]
 
+        # mask에 의해 repeatability가 전부 0으로 구성되어 있는 patch를 loss 계산에서 제외시킴.
         return 1 *( cosim[cosim!=0].shape[0] / cosim.shape[1]) - cosim.mean()
 
 
@@ -67,8 +69,29 @@ class PeakyLoss(nn.Module) :
         self.maxpool = nn.MaxPool2d(self.N+1, stride=1, padding=self.N//2)
         self.avgpool = nn.AvgPool2d(self.N+1, stride=1, padding=self.N//2)
 
-    def forward_one(self, repeatability) :
+    def forward_one_source(self, repeatability) :
         return 1 - (self.maxpool(repeatability.unsqueeze(0)) - self.avgpool(repeatability.unsqueeze(0))).mean()
+
+    def forward_one_transform(self, repeatability, meta) :
+        """
+        Args :
+            - repeatability : transformed repeatability heatmap torch tensor shape of (1, H, W)
+            - meta : meta['mask']
+        """
+
+        if 'mask' not in meta :
+            return self.forward_one_source(repeatability)
+
+        else :
+            max_pooled = self.maxpool(repeatability.unsqueeze(0))
+            avg_pooled = self.avgpool(repeatability.unsqueeze(0))
+            mask_pooled = self.maxpool(meta['mask'].unsqueeze(0))
+            # max_pool = [1, H*, W*]
+            # avg_pool = [1, H*, W*]
+            peaky = max_pooled - avg_pooled
+            return 1 * (mask_pooled[mask_pooled!=0].shape[0] / mask_pooled.shape[1] * mask_pooled.shape[2]) - peaky.mean()
+
+
 
     def forward(self, repeatability_map) :
         """

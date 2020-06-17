@@ -48,7 +48,7 @@ def train(epoch) :
 
             descriptors, reliabilities, repeatabilities = r2d2([image1, image2])
             loss1 = cosimloss.forward_one(repeatabilities[0][0], repeatabilities[1][0], meta)
-            loss2 = (peakyloss.forward_one(repeatabilities[0][0]) + peakyloss.forward_one(repeatabilities[1][0]) )/2
+            loss2 = (peakyloss.forward_one_source(repeatabilities[0][0]) + peakyloss.forward_one_transform(repeatabilities[1][0]) )/2
             loss3 = aploss.forward_one(descriptors[0][0], descriptors[1][0], reliabilities[0][0], meta)
             loss += loss1 + loss2 + loss3
 
